@@ -56,7 +56,7 @@ def decode_value(registers, dtype):
     decoder = BinaryPayloadDecoder.fromRegisters(
         registers,
         byteorder=Endian.BIG,
-        wordorder=Endian.LITTLE  # QUAN TRỌNG
+        wordorder=Endian.BIG  # QUAN TRỌNG
     )
 
     if dtype == "uint16":
