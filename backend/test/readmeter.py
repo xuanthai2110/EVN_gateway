@@ -2,6 +2,10 @@ from pymodbus.client import ModbusTcpClient
 from pymodbus.payload import BinaryPayloadDecoder
 from pymodbus.constants import Endian
 
+IP = "192.168.1.8"
+PORT = 502
+
+
 # ================= CONFIG =================
 
 SMARTLOGGER_CONFIG = {
@@ -24,7 +28,7 @@ SMARTLOGGER_CONFIG = {
 }
 
 INVERTER_CONFIG = {
-    "unit_ids": [1],  # thêm [2,3,...] nếu có nhiều inverter
+    "unit_ids": [1],
     "telemetry": [
         {"name": "status", "address": 32009, "length": 1, "type": "uint16", "scale": 1},
         {"name": "p_inv_out_kw", "address": 32080, "length": 2, "type": "sint32", "scale": 0.001},
@@ -41,20 +45,34 @@ INVERTER_CONFIG = {
     ],
 }
 
+
 # ================= CORE =================
 
 def read_register(client, unit_id, address, length):
+    """
+    Auto detect Input / Holding
+    """
+    # thử INPUT trước (Huawei hay dùng)
+    rr = client.read_input_registers(address - 1, length, unit=unit_id)
+    if not rr.isError():
+        return rr.registers
+
+    # fallback HOLDING
     rr = client.read_holding_registers(address - 1, length, unit=unit_id)
-    if rr.isError():
-        return None
-    return rr.registers
+    if not rr.isError():
+        return rr.registers
+
+    return None
 
 
 def decode_value(registers, dtype):
+    """
+    Decode với endian chuẩn Huawei/Sungrow
+    """
     decoder = BinaryPayloadDecoder.fromRegisters(
         registers,
         byteorder=Endian.BIG,
-        wordorder=Endian.BIG
+        wordorder=Endian.LITTLE  # QUAN TRỌNG
     )
 
     if dtype == "uint16":
@@ -67,7 +85,7 @@ def decode_value(registers, dtype):
         return decoder.decode_32bit_int()
 
 
-# ================= READ SMARTLOGGER =================
+# ================= SMARTLOGGER =================
 
 def read_smartlogger(client):
     data = {}
@@ -86,7 +104,7 @@ def read_smartlogger(client):
     return data
 
 
-# ================= READ INVERTER =================
+# ================= INVERTER =================
 
 def read_inverters(client):
     results = {}
@@ -97,7 +115,7 @@ def read_inverters(client):
         for item in INVERTER_CONFIG["telemetry"]:
             regs = read_register(client, unit_id, item["address"], item["length"])
 
-            # fallback
+            # fallback address
             if not regs and "fallback_addresses" in item:
                 for fb in item["fallback_addresses"]:
                     regs = read_register(client, unit_id, fb, item["length"])
@@ -115,23 +133,44 @@ def read_inverters(client):
     return results
 
 
+# ================= DEBUG =================
+
+def debug_raw(client):
+    print("\n--- DEBUG RAW ---")
+
+    # test smartlogger energy
+    rr = client.read_input_registers(40562 - 1, 2, unit=0)
+    print("SmartLogger e_day raw:", rr.registers if not rr.isError() else "ERROR")
+
+    # test inverter power
+    rr = client.read_input_registers(32080 - 1, 2, unit=1)
+    print("Inverter P raw:", rr.registers if not rr.isError() else "ERROR")
+
+
 # ================= MAIN =================
 
+def main():
+    client = ModbusTcpClient(IP, port=PORT)
+
+    if not client.connect():
+        print("❌ Connection failed")
+        return
+
+    print("✅ Connected")
+
+    debug_raw(client)
+
+    smart = read_smartlogger(client)
+    inv = read_inverters(client)
+
+    print("\n=== SMARTLOGGER ===")
+    print(smart)
+
+    print("\n=== INVERTER ===")
+    print(inv)
+
+    client.close()
+
+
 if __name__ == "__main__":
-    client = ModbusTcpClient("192.168.1.8", port=502)
-
-    if client.connect():
-        print("Connected!")
-
-        smartlogger_data = read_smartlogger(client)
-        inverter_data = read_inverters(client)
-
-        print("\n=== SMARTLOGGER ===")
-        print(smartlogger_data)
-
-        print("\n=== INVERTER ===")
-        print(inverter_data)
-
-        client.close()
-    else:
-        print("Connection failed!")
+    main()
