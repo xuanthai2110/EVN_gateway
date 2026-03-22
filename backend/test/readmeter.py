@@ -1,3 +1,8 @@
+
+import sys
+from pathlib import Path
+backend_dir = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(backend_dir))
 from drivers.huawei_smartlogger import SmartLogger,Inverter,HuaweiModbusDriver
 def main():
     huawei = HuaweiModbusDriver(host="192.168.1.8")
