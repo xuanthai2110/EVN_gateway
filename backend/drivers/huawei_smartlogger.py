@@ -14,11 +14,13 @@ RegisterDef = Dict[str, Any]
 
 class HuaweiSmartLoggerDriver(BaseDriver):
     SMARTLOGGER_UNIT_ID = 0
+    INVERTER_UNIT_IDS = [1, 4, 3, 5, 6, 7, 8, 9]
 
     def __init__(self, transport, slave_id: int):
         self.transport = transport
         self.slave_id = slave_id
         self.smartlogger_id = self.SMARTLOGGER_UNIT_ID
+        self.inverter_unit_ids = list(self.INVERTER_UNIT_IDS)
 
     def register_map(self) -> Dict[str, Any]:
         return {
@@ -48,7 +50,7 @@ class HuaweiSmartLoggerDriver(BaseDriver):
                 ],
             },
             "inverter": {
-                "unit_id": self.slave_id,
+                "unit_ids": self.inverter_unit_ids,
                 "telemetry": [
                     {"name": "status", "address": 32009, "length": 1, "type": "uint16", "scale": 1, "access": "ro"},
                     {"name": "p_inv_out_kw", "address": 32080, "length": 2, "type": "sint32", "scale": 0.001, "access": "ro"},
@@ -145,14 +147,17 @@ class HuaweiSmartLoggerDriver(BaseDriver):
 
     def read_inverter(self) -> Dict[str, Any]:
         config = self.register_map_inverter()
-        unit_id = config["unit_id"]
-        raw = {
-            "telemetry": self._read_group(config["telemetry"], unit_id),
-        }
+        raw: Dict[str, Any] = {}
+        parsed: Dict[str, Any] = {}
+        for unit_id in config["unit_ids"]:
+            telemetry = self._read_group(config["telemetry"], unit_id)
+            key = f"inverter_{unit_id}"
+            raw[key] = telemetry
+            parsed[key] = self.parse(telemetry)
         return {
-            "unit_id": unit_id,
+            "unit_ids": config["unit_ids"],
             "raw": raw,
-            "parsed": self.parse(raw),
+            "parsed": parsed,
         }
 
     def _encode_value(self, value: float, definition: RegisterDef) -> List[int]:

@@ -32,7 +32,7 @@ def get_all_register_data(smartlogger_ip: str, port: int, device_addr: int) -> d
         return {
             "smartlogger_ip": smartlogger_ip,
             "smartlogger_unit_id": SMARTLOGGER_ID,
-            "inverter_unit_id": device_addr,
+            "inverter_unit_ids": driver.inverter_unit_ids,
             "smartlogger": smartlogger_data,
             "inverter": inverter_data,
         }
