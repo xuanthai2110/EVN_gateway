@@ -49,13 +49,12 @@ INVERTER_CONFIG = {
 # ================= CORE =================
 
 def read_register(client, unit_id, address, length):
-    # fallback HOLDING
-    rr = client.read_holding_registers(address - 1, length, slave=unit_id)
-    if not rr.isError():
-        return rr.registers
+    rr = client.read_holding_registers(address - 1, length, unit=unit_id)
 
-    return None
+    if rr.isError():
+        return None
 
+    return rr.registers
 
 def decode_value(registers, dtype):
     """
