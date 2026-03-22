@@ -117,7 +117,9 @@ class HuaweiSmartLoggerDriver(BaseDriver):
     def parse(self, raw_data: Dict[str, Any]) -> Dict[str, Any]:
         parsed: Dict[str, Any] = {}
         for key, value in raw_data.items():
-            if isinstance(value, dict) and "value" in value:
+            if isinstance(value, dict) and value.get("ok") is False:
+                parsed[key] = None
+            elif isinstance(value, dict) and "value" in value:
                 parsed[key] = value["value"]
             elif isinstance(value, dict):
                 parsed[key] = self.parse(value)
@@ -128,8 +130,38 @@ class HuaweiSmartLoggerDriver(BaseDriver):
     def _read_group(self, definitions: List[RegisterDef], unit_id: int) -> Dict[str, Any]:
         raw_group: Dict[str, Any] = {}
         for definition in definitions:
-            raw_group[definition["name"]] = self._read_definition(definition, unit_id)
+            try:
+                raw_group[definition["name"]] = self._read_definition(definition, unit_id)
+            except Exception as exc:
+                raw_group[definition["name"]] = {
+                    "name": definition["name"],
+                    "address": definition["address"],
+                    "unit_id": unit_id,
+                    "ok": False,
+                    "error": str(exc),
+                    "access": definition.get("access", "ro"),
+                    "type": definition["type"],
+                    "scale": definition.get("scale", 1),
+                }
         return raw_group
+
+    def _collect_errors(self, data: Dict[str, Any], prefix: str = "") -> List[Dict[str, Any]]:
+        errors: List[Dict[str, Any]] = []
+        for key, value in data.items():
+            path = f"{prefix}.{key}" if prefix else key
+            if isinstance(value, dict) and value.get("ok") is False:
+                errors.append(
+                    {
+                        "path": path,
+                        "name": value.get("name"),
+                        "address": value.get("address"),
+                        "unit_id": value.get("unit_id"),
+                        "error": value.get("error"),
+                    }
+                )
+            elif isinstance(value, dict):
+                errors.extend(self._collect_errors(value, path))
+        return errors
 
     def read_smartlogger(self) -> Dict[str, Any]:
         config = self.register_map()["smartlogger"]
@@ -143,6 +175,7 @@ class HuaweiSmartLoggerDriver(BaseDriver):
             "unit_id": unit_id,
             "raw": raw,
             "parsed": self.parse(raw),
+            "errors": self._collect_errors(raw),
         }
 
     def read_inverter(self) -> Dict[str, Any]:
@@ -158,6 +191,7 @@ class HuaweiSmartLoggerDriver(BaseDriver):
             "unit_ids": config["unit_ids"],
             "raw": raw,
             "parsed": parsed,
+            "errors": self._collect_errors(raw),
         }
 
     def _encode_value(self, value: float, definition: RegisterDef) -> List[int]:
