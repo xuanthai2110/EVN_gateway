@@ -1,261 +1,144 @@
-from __future__ import annotations
+import time
+import logging
+from typing import Dict, Any, List
+
+from pymodbus.client import ModbusTcpClient
+from pymodbus.payload import BinaryPayloadDecoder
+from pymodbus.constants import Endian
+
+logger = logging.getLogger(__name__)
 
 
-from typing import Any, Dict, List
+# ================= BASE DRIVER =================
 
-try:
-    from .base import BaseDriver
-except ImportError:
-    from base import BaseDriver
+class HuaweiModbusDriver:
+    def __init__(self, host: str, port: int = 502, timeout: int = 3):
+        self.host = host
+        self.port = port
+        self.client = ModbusTcpClient(host, port=port, timeout=timeout)
 
-
-RegisterDef = Dict[str, Any]
-
-
-class HuaweiSmartLoggerDriver(BaseDriver):
-    SMARTLOGGER_UNIT_ID = 0
-    INVERTER_UNIT_IDS = [1, 4, 3, 5, 6, 7, 8, 9]
-
-    def __init__(self, transport, slave_id: int):
-        self.transport = transport
-        self.slave_id = slave_id
-        self.smartlogger_id = self.SMARTLOGGER_UNIT_ID
-        self.inverter_unit_ids = list(self.INVERTER_UNIT_IDS)
-
-    def register_map(self) -> Dict[str, Any]:
-        return {
-            "smartlogger": {
-                "unit_id": self.smartlogger_id,
-                "grid": [
-                    {"name": "p_inv_total_kw", "address": 40525, "length": 2, "type": "sint32", "scale": 0.001, "access": "ro"},
-                    {"name": "q_inv_total_kvar", "address": 40544, "length": 2, "type": "sint32", "scale": 0.001, "access": "ro"},
-                    {"name": "v_a", "address": 40575, "length": 1, "type": "uint16", "scale": 0.1, "access": "ro"},
-                    {"name": "v_b", "address": 40576, "length": 1, "type": "uint16", "scale": 0.1, "access": "ro"},
-                    {"name": "v_c", "address": 40577, "length": 1, "type": "uint16", "scale": 0.1, "access": "ro"},
-                    {"name": "i_a", "address": 40572, "length": 1, "type": "uint16", "scale": 1, "access": "ro"},
-                    {"name": "i_b", "address": 40573, "length": 1, "type": "uint16", "scale": 1, "access": "ro"},
-                    {"name": "i_c", "address": 40574, "length": 1, "type": "uint16", "scale": 1, "access": "ro"},
-                    {"name": "pf", "address": 40532, "length": 1, "type": "sint16", "scale": 0.001, "access": "ro"},
-                ],
-                "energy": [
-                    {"name": "e_day_kwh", "address": 40562, "length": 2, "type": "uint32", "scale": 0.1, "access": "ro"},
-                    {"name": "e_total_kwh", "address": 40560, "length": 2, "type": "uint32", "scale": 0.1, "access": "ro"},
-                ],
-                "control": [
-                    {"name": "q_set_kvar", "address": 40422, "length": 2, "type": "sint32", "scale": 0.1, "access": "rw"},
-                    {"name": "p_set_kw", "address": 40424, "length": 2, "type": "uint32", "scale": 0.1, "access": "rw"},
-                    {"name": "p_set_percent", "address": 40428, "length": 1, "type": "uint16", "scale": 0.1, "access": "rw"},
-                    {"name": "pf_set", "address": 40429, "length": 1, "type": "sint16", "scale": 0.001, "access": "rw"},
-                ],
-            },
-            "inverter": {
-                "unit_ids": self.inverter_unit_ids,
-                "telemetry": [
-                    {"name": "status", "address": 32009, "length": 1, "type": "uint16", "scale": 1, "access": "ro"},
-                    {"name": "p_inv_out_kw", "address": 32080, "length": 2, "type": "sint32", "scale": 0.001, "access": "ro"},
-                    {
-                        "name": "freq",
-                        "address": 37118,
-                        "fallback_addresses": [32085],
-                        "length": 1,
-                        "type": "uint16",
-                        "scale": 0.01,
-                        "access": "ro",
-                    },
-                    {"name": "q_inv_kvar", "address": 32106, "length": 2, "type": "sint32", "scale": 0.001, "access": "ro"},
-                    {"name": "e_day_kwh", "address": 32114, "length": 2, "type": "uint32", "scale": 0.01, "access": "ro"},
-                ],
-            },
-        }
-
-    def register_map_inverter(self) -> Dict[str, Any]:
-        return self.register_map()["inverter"]
-
-    def _read_registers(self, address: int, count: int, unit_id: int) -> List[int]:
-        response = self.transport.read_holding_registers(address=address, count=count, slave=unit_id)
-        if response is None:
-            raise IOError(f"No response for address={address}, count={count}, unit={unit_id}")
-        if hasattr(response, "isError") and response.isError():
-            raise IOError(f"Modbus exception for address={address}, count={count}, unit={unit_id}: {response!r}")
-        return list(response.registers)
-
-    def _decode_value(self, registers: List[int], value_type: str) -> int:
-        normalized_type = value_type.lower()
-        if normalized_type == "i32":
-            normalized_type = "sint32"
-
-        if normalized_type == "uint16":
-            return registers[0] & 0xFFFF
-
-        if normalized_type == "sint16":
-            value = registers[0] & 0xFFFF
-            return value - 0x10000 if value & 0x8000 else value
-
-        if normalized_type == "uint32":
-            return ((registers[0] & 0xFFFF) << 16) | (registers[1] & 0xFFFF)
-
-        if normalized_type == "sint32":
-            value = ((registers[0] & 0xFFFF) << 16) | (registers[1] & 0xFFFF)
-            return value - 0x100000000 if value & 0x80000000 else value
-
-        raise ValueError(f"Unsupported register type: {value_type}")
-
-    def _apply_scale(self, value: int, scale: float) -> float | int:
-        if scale in (None, 1):
-            return value
-        return value * scale
-
-    def _read_definition(self, definition: RegisterDef, unit_id: int) -> Dict[str, Any]:
-        candidate_addresses = [definition["address"], *definition.get("fallback_addresses", [])]
-        last_error: Exception | None = None
-
-        for candidate_address in candidate_addresses:
-            try:
-                registers = self._read_registers(candidate_address, definition["length"], unit_id)
-                raw_value = self._decode_value(registers, definition["type"])
-                value = self._apply_scale(raw_value, definition.get("scale", 1))
-                return {
-                    "name": definition["name"],
-                    "address": candidate_address,
-                    "requested_address": definition["address"],
-                    "unit_id": unit_id,
-                    "registers": registers,
-                    "raw": raw_value,
-                    "value": value,
-                    "access": definition.get("access", "ro"),
-                    "type": definition["type"],
-                    "scale": definition.get("scale", 1),
-                }
-            except Exception as exc:
-                last_error = exc
-
-        assert last_error is not None
-        raise last_error
-
-    def parse(self, raw_data: Dict[str, Any]) -> Dict[str, Any]:
-        parsed: Dict[str, Any] = {}
-        for key, value in raw_data.items():
-            if isinstance(value, dict) and value.get("ok") is False:
-                parsed[key] = None
-            elif isinstance(value, dict) and "value" in value:
-                parsed[key] = value["value"]
-            elif isinstance(value, dict):
-                parsed[key] = self.parse(value)
-            else:
-                parsed[key] = value
-        return parsed
-
-    def _read_group(self, definitions: List[RegisterDef], unit_id: int) -> Dict[str, Any]:
-        raw_group: Dict[str, Any] = {}
-        for definition in definitions:
-            try:
-                raw_group[definition["name"]] = self._read_definition(definition, unit_id)
-            except Exception as exc:
-                raw_group[definition["name"]] = {
-                    "name": definition["name"],
-                    "address": definition["address"],
-                    "unit_id": unit_id,
-                    "ok": False,
-                    "error": str(exc),
-                    "access": definition.get("access", "ro"),
-                    "type": definition["type"],
-                    "scale": definition.get("scale", 1),
-                }
-        return raw_group
-
-    def _collect_errors(self, data: Dict[str, Any], prefix: str = "") -> List[Dict[str, Any]]:
-        errors: List[Dict[str, Any]] = []
-        for key, value in data.items():
-            path = f"{prefix}.{key}" if prefix else key
-            if isinstance(value, dict) and value.get("ok") is False:
-                errors.append(
-                    {
-                        "path": path,
-                        "name": value.get("name"),
-                        "address": value.get("address"),
-                        "unit_id": value.get("unit_id"),
-                        "error": value.get("error"),
-                    }
-                )
-            elif isinstance(value, dict):
-                errors.extend(self._collect_errors(value, path))
-        return errors
-
-    def read_smartlogger(self) -> Dict[str, Any]:
-        config = self.register_map()["smartlogger"]
-        unit_id = config["unit_id"]
-        raw = {
-            "grid": self._read_group(config["grid"], unit_id),
-            "energy": self._read_group(config["energy"], unit_id),
-            "control": self._read_group(config["control"], unit_id),
-        }
-        return {
-            "unit_id": unit_id,
-            "raw": raw,
-            "parsed": self.parse(raw),
-            "errors": self._collect_errors(raw),
-        }
-
-    def read_inverter(self) -> Dict[str, Any]:
-        config = self.register_map_inverter()
-        raw: Dict[str, Any] = {}
-        parsed: Dict[str, Any] = {}
-        for unit_id in config["unit_ids"]:
-            telemetry = self._read_group(config["telemetry"], unit_id)
-            key = f"inverter_{unit_id}"
-            raw[key] = telemetry
-            parsed[key] = self.parse(telemetry)
-        return {
-            "unit_ids": config["unit_ids"],
-            "raw": raw,
-            "parsed": parsed,
-            "errors": self._collect_errors(raw),
-        }
-
-    def _encode_value(self, value: float, definition: RegisterDef) -> List[int]:
-        scale = definition.get("scale", 1) or 1
-        raw_value = int(round(value / scale))
-        value_type = definition["type"].lower()
-
-        if value_type == "i32":
-            value_type = "sint32"
-
-        if value_type == "uint16":
-            return [raw_value & 0xFFFF]
-
-        if value_type == "sint16":
-            return [raw_value & 0xFFFF]
-
-        if value_type in {"uint32", "sint32"}:
-            raw_value &= 0xFFFFFFFF
-            return [(raw_value >> 16) & 0xFFFF, raw_value & 0xFFFF]
-
-        raise ValueError(f"Unsupported register type for write: {definition['type']}")
-
-    def _write_definition_value(self, definition: RegisterDef, value: float) -> bool:
-        registers = self._encode_value(value, definition)
-        if len(registers) == 1:
-            response = self.transport.write_register(address=definition["address"], value=registers[0], slave=self.smartlogger_id)
-        else:
-            response = self.transport.write_registers(address=definition["address"], values=registers, slave=self.smartlogger_id)
-        return not (hasattr(response, "isError") and response.isError())
-
-    def _control_definition(self, name: str) -> RegisterDef:
-        controls = self.register_map()["smartlogger"]["control"]
-        for definition in controls:
-            if definition["name"] == name:
-                return definition
-        raise KeyError(f"Control register not found: {name}")
-
-    def enable_power_limit(self, enable: bool) -> bool:
-        # Current register map does not expose a dedicated enable coil/register.
-        # Keep the method concrete for the driver interface and signal unsupported control.
+    def connect(self) -> bool:
+        if self.client.connect():
+            logger.info(f"Connected to {self.host}")
+            return True
+        logger.error(f"Failed to connect {self.host}")
         return False
 
-    def write_power_limit_kw(self, kw: float) -> bool:
-        definition = self._control_definition("p_set_kw")
-        return self._write_definition_value(definition, kw)
+    def close(self):
+        self.client.close()
 
-    def write_power_limit_percent(self, percent: float) -> bool:
-        definition = self._control_definition("p_set_percent")
-        return self._write_definition_value(definition, percent)
+    def read_registers(self, unit_id: int, address: int, length: int):
+        try:
+            rr = self.client.read_holding_registers(address, length, slave=unit_id)
+            if rr.isError():
+                logger.warning(f"Read fail u={unit_id} addr={address}")
+                return None
+            return rr.registers
+        except Exception as e:
+            logger.error(f"Exception read: {e}")
+            return None
+
+    @staticmethod
+    def decode(registers: List[int], dtype: str):
+        decoder = BinaryPayloadDecoder.fromRegisters(
+            registers,
+            byteorder=Endian.BIG,
+            wordorder=Endian.BIG
+        )
+
+        if dtype == "uint16":
+            return decoder.decode_16bit_uint()
+        elif dtype == "sint16":
+            return decoder.decode_16bit_int()
+        elif dtype == "uint32":
+            return decoder.decode_32bit_uint()
+        elif dtype == "sint32":
+            return decoder.decode_32bit_int()
+        else:
+            return None
+
+
+# ================= SMARTLOGGER =================
+
+class SmartLogger:
+    def __init__(self, driver: HuaweiModbusDriver, unit_id: int = 0):
+        self.driver = driver
+        self.unit_id = unit_id
+
+        self.map = [
+            # grid
+            ("p_inv_total_kw", 40525, 2, "sint32", 0.001),
+            ("q_inv_total_kvar", 40544, 2, "sint32", 0.001),
+            ("v_a", 40575, 1, "uint16", 0.1),
+            ("v_b", 40576, 1, "uint16", 0.1),
+            ("v_c", 40577, 1, "uint16", 0.1),
+            ("i_a", 40572, 1, "uint16", 1),
+            ("i_b", 40573, 1, "uint16", 1),
+            ("i_c", 40574, 1, "uint16", 1),
+            ("pf", 40532, 1, "sint16", 0.001),
+
+            # energy (FIX SCALE)
+            ("e_day_kwh", 40562, 2, "uint32", 0.001),
+            ("e_total_kwh", 40560, 2, "uint32", 0.001),
+        ]
+
+    def read(self) -> Dict[str, Any]:
+        data = {}
+
+        for name, addr, length, dtype, scale in self.map:
+            regs = self.driver.read_registers(self.unit_id, addr, length)
+
+            if regs:
+                try:
+                    value = self.driver.decode(regs, dtype)
+                    data[name] = round(value * scale, 3)
+                except Exception as e:
+                    logger.error(f"Decode error {name}: {e}")
+                    data[name] = None
+            else:
+                data[name] = None
+
+        return data
+
+
+# ================= INVERTER =================
+
+class Inverter:
+    def __init__(self, driver: HuaweiModbusDriver, unit_ids: List[int]):
+        self.driver = driver
+        self.unit_ids = unit_ids
+
+        self.map = [
+            ("status", 32009, 1, "uint16", 1),
+            ("p_inv_out_kw", 32080, 2, "sint32", 0.001),
+            ("freq", 32085, 1, "uint16", 0.01),
+            ("q_inv_kvar", 32082, 2, "sint32", 0.001),
+            ("e_day_kwh", 32114, 2, "uint32", 0.001),
+        ]
+
+    def read(self) -> Dict[int, Dict[str, Any]]:
+        results = {}
+
+        for uid in self.unit_ids:
+            inv_data = {}
+
+            for name, addr, length, dtype, scale in self.map:
+                regs = self.driver.read_registers(uid, addr, length)
+
+                if regs:
+                    try:
+                        value = self.driver.decode(regs, dtype)
+                        inv_data[name] = round(value * scale, 3)
+                    except Exception as e:
+                        logger.error(f"Decode error inv{uid}-{name}: {e}")
+                        inv_data[name] = None
+                else:
+                    inv_data[name] = None
+
+            results[uid] = inv_data
+
+        return results
+
+
+# ================= MAIN TEST =================
+
