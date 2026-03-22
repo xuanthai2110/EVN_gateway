@@ -78,8 +78,8 @@ class SmartLogger:
             ("pf", 40532, 1, "sint16", 0.001),
 
             # energy (FIX SCALE)
-            ("e_day_kwh", 40562, 2, "uint32", 0.001),
-            ("e_total_kwh", 40560, 2, "uint32", 0.001),
+            ("e_day_kwh", 40562, 2, "uint32", 0.1),
+            ("e_total_kwh", 40560, 2, "uint32", 0.1),
         ]
 
     def read(self) -> Dict[str, Any]:
@@ -113,7 +113,7 @@ class Inverter:
             ("p_inv_out_kw", 32080, 2, "sint32", 0.001),
             ("freq", 32085, 1, "uint16", 0.01),
             ("q_inv_kvar", 32082, 2, "sint32", 0.001),
-            ("e_day_kwh", 32114, 2, "uint32", 0.001),
+            ("e_day_kwh", 32114, 2, "uint32", 0.01),
         ]
 
     def read(self) -> Dict[int, Dict[str, Any]]:
