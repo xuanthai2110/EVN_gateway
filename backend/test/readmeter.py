@@ -49,16 +49,8 @@ INVERTER_CONFIG = {
 # ================= CORE =================
 
 def read_register(client, unit_id, address, length):
-    """
-    Auto detect Input / Holding
-    """
-    # thử INPUT trước (Huawei hay dùng)
-    rr = client.read_input_registers(address - 1, length, unit=unit_id)
-    if not rr.isError():
-        return rr.registers
-
     # fallback HOLDING
-    rr = client.read_holding_registers(address - 1, length, unit=unit_id)
+    rr = client.read_holding_registers(address - 1, length, slave=unit_id)
     if not rr.isError():
         return rr.registers
 
