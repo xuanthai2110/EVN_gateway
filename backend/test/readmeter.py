@@ -28,19 +28,12 @@ SMARTLOGGER_CONFIG = {
 }
 
 INVERTER_CONFIG = {
-    "unit_ids": [1],
+    "unit_ids": [1,3,4,5,6,7,8,9],
     "telemetry": [
         {"name": "status", "address": 32009, "length": 1, "type": "uint16", "scale": 1},
         {"name": "p_inv_out_kw", "address": 32080, "length": 2, "type": "sint32", "scale": 0.001},
-        {
-            "name": "freq",
-            "address": 37118,
-            "fallback_addresses": [32085],
-            "length": 1,
-            "type": "uint16",
-            "scale": 0.01,
-        },
-        {"name": "q_inv_kvar", "address": 32106, "length": 2, "type": "sint32", "scale": 0.001},
+        {"name": "freq","address": 32085,"length": 1,"type": "uint16","scale": 0.01,},
+        {"name": "q_inv_kvar", "address": 32082, "length": 2, "type": "sint32", "scale": 0.001},
         {"name": "e_day_kwh", "address": 32114, "length": 2, "type": "uint32", "scale": 0.01},
     ],
 }
