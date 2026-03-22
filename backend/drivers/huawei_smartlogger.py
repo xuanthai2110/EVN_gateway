@@ -36,7 +36,6 @@ class HuaweiSmartLoggerDriver(BaseDriver):
                     {"name": "i_b", "address": 40573, "length": 1, "type": "uint16", "scale": 1, "access": "ro"},
                     {"name": "i_c", "address": 40574, "length": 1, "type": "uint16", "scale": 1, "access": "ro"},
                     {"name": "pf", "address": 40532, "length": 1, "type": "sint16", "scale": 0.001, "access": "ro"},
-                    {"name": "freq", "address": 37118, "length": 1, "type": "sint16", "scale": 0.01, "access": "ro"},
                 ],
                 "energy": [
                     {"name": "e_day_kwh", "address": 40562, "length": 2, "type": "uint32", "scale": 0.1, "access": "ro"},
@@ -54,7 +53,15 @@ class HuaweiSmartLoggerDriver(BaseDriver):
                 "telemetry": [
                     {"name": "status", "address": 32009, "length": 1, "type": "uint16", "scale": 1, "access": "ro"},
                     {"name": "p_inv_out_kw", "address": 32080, "length": 2, "type": "sint32", "scale": 0.001, "access": "ro"},
-                    {"name": "freq", "address": 32085, "length": 1, "type": "uint16", "scale": 0.01, "access": "ro"},
+                    {
+                        "name": "freq",
+                        "address": 37118,
+                        "fallback_addresses": [32085],
+                        "length": 1,
+                        "type": "uint16",
+                        "scale": 0.01,
+                        "access": "ro",
+                    },
                     {"name": "q_inv_kvar", "address": 32106, "length": 2, "type": "sint32", "scale": 0.001, "access": "ro"},
                     {"name": "e_day_kwh", "address": 32114, "length": 2, "type": "uint32", "scale": 0.01, "access": "ro"},
                 ],
@@ -99,20 +106,31 @@ class HuaweiSmartLoggerDriver(BaseDriver):
         return value * scale
 
     def _read_definition(self, definition: RegisterDef, unit_id: int) -> Dict[str, Any]:
-        registers = self._read_registers(definition["address"], definition["length"], unit_id)
-        raw_value = self._decode_value(registers, definition["type"])
-        value = self._apply_scale(raw_value, definition.get("scale", 1))
-        return {
-            "name": definition["name"],
-            "address": definition["address"],
-            "unit_id": unit_id,
-            "registers": registers,
-            "raw": raw_value,
-            "value": value,
-            "access": definition.get("access", "ro"),
-            "type": definition["type"],
-            "scale": definition.get("scale", 1),
-        }
+        candidate_addresses = [definition["address"], *definition.get("fallback_addresses", [])]
+        last_error: Exception | None = None
+
+        for candidate_address in candidate_addresses:
+            try:
+                registers = self._read_registers(candidate_address, definition["length"], unit_id)
+                raw_value = self._decode_value(registers, definition["type"])
+                value = self._apply_scale(raw_value, definition.get("scale", 1))
+                return {
+                    "name": definition["name"],
+                    "address": candidate_address,
+                    "requested_address": definition["address"],
+                    "unit_id": unit_id,
+                    "registers": registers,
+                    "raw": raw_value,
+                    "value": value,
+                    "access": definition.get("access", "ro"),
+                    "type": definition["type"],
+                    "scale": definition.get("scale", 1),
+                }
+            except Exception as exc:
+                last_error = exc
+
+        assert last_error is not None
+        raise last_error
 
     def parse(self, raw_data: Dict[str, Any]) -> Dict[str, Any]:
         parsed: Dict[str, Any] = {}
