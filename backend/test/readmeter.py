@@ -1,5 +1,5 @@
-# pip install pymodbus==3.6.7
 from __future__ import annotations
+
 
 import json
 import sys
