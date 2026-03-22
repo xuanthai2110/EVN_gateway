@@ -1,5 +1,5 @@
 
-import sys
+import sys,time
 from pathlib import Path
 backend_dir = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(backend_dir))
@@ -15,6 +15,7 @@ def main():
 
         inverter_data = inverter.read()
         print("Inverter Data:", inverter_data)
+        time.sleep(5)
 
 
 if __name__ == "__main__":
