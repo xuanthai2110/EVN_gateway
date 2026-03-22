@@ -49,7 +49,7 @@ INVERTER_CONFIG = {
 # ================= CORE =================
 
 def read_register(client, unit_id, address, length):
-    rr = client.read_holding_registers(address - 1, length, unit=unit_id)
+    rr = client.read_holding_registers(address, length, slave=unit_id)
 
     if rr.isError():
         return None
